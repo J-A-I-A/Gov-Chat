@@ -115,7 +115,7 @@
 		{#if $config?.license_metadata}
 			<div class="mb-2 text-xs">
 				{#if !$WEBUI_NAME.includes('Open WebUI')}
-					<span class=" text-gray-500 dark:text-gray-300 font-medium">{$WEBUI_NAME}</span> -
+					<span class=" text-gray-500 dark:text-gray-300 font-medium">Gov Chat</span> -
 				{/if}
 
 				<span class=" capitalize">{$config?.license_metadata?.type}</span> license purchased by
@@ -155,9 +155,9 @@
 		<div>
 			<pre
 				class="text-xs text-gray-400 dark:text-gray-500">Copyright (c) {new Date().getFullYear()} <a
-					href="https://openwebui.com"
+					href="https://github.com/J-A-I-A/Gov-Chat"
 					target="_blank"
-					class="underline">Open WebUI Inc.</a
+					class="underline">JAIA</a
 				> <a href="https://github.com/open-webui/open-webui/blob/main/LICENSE" target="_blank"
 					>All rights reserved.</a
 				>
