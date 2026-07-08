@@ -260,6 +260,28 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-medium">
+					<Tooltip
+						content={$i18n.t(
+							'When disabled, members can only share knowledge bases with groups they belong to. Sharing with other groups, individual users, or publicly is blocked.'
+						)}
+					>
+						{$i18n.t('Knowledge Sharing Outside Group')}
+					</Tooltip>
+				</div>
+				<Switch bind:state={permissions.sharing.knowledge_outside_group} />
+			</div>
+			{#if defaultPermissions?.sharing?.knowledge_outside_group && !permissions.sharing.knowledge_outside_group}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Prompts Sharing')}
 				</div>
 				<Switch bind:state={permissions.sharing.prompts} />
@@ -294,6 +316,28 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-medium">
+					<Tooltip
+						content={$i18n.t(
+							'When disabled, members can only share prompts with groups they belong to. Sharing with other groups, individual users, or publicly is blocked.'
+						)}
+					>
+						{$i18n.t('Prompts Sharing Outside Group')}
+					</Tooltip>
+				</div>
+				<Switch bind:state={permissions.sharing.prompts_outside_group} />
+			</div>
+			{#if defaultPermissions?.sharing?.prompts_outside_group && !permissions.sharing.prompts_outside_group}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Tools Sharing')}
 				</div>
 				<Switch bind:state={permissions.sharing.tools} />
@@ -324,6 +368,28 @@
 				{/if}
 			</div>
 		{/if}
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					<Tooltip
+						content={$i18n.t(
+							'When disabled, members can only share tools with groups they belong to. Sharing with other groups, individual users, or publicly is blocked.'
+						)}
+					>
+						{$i18n.t('Tools Sharing Outside Group')}
+					</Tooltip>
+				</div>
+				<Switch bind:state={permissions.sharing.tools_outside_group} />
+			</div>
+			{#if defaultPermissions?.sharing?.tools_outside_group && !permissions.sharing.tools_outside_group}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
 
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
@@ -392,6 +458,28 @@
 				{/if}
 			</div>
 		{/if}
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					<Tooltip
+						content={$i18n.t(
+							'When disabled, members can only share notes with groups they belong to. Sharing with other groups, individual users, or publicly is blocked.'
+						)}
+					>
+						{$i18n.t('Notes Sharing Outside Group')}
+					</Tooltip>
+				</div>
+				<Switch bind:state={permissions.sharing.notes_outside_group} />
+			</div>
+			{#if defaultPermissions?.sharing?.notes_outside_group && !permissions.sharing.notes_outside_group}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
 
 		{#if permissions.chat.share}
 			<div class="flex flex-col w-full">
@@ -739,6 +827,28 @@
 				<Switch bind:state={permissions.chat.multiple_models} />
 			</div>
 			{#if defaultPermissions?.chat?.multiple_models && !permissions.chat.multiple_models}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					<Tooltip
+						content={$i18n.t(
+							'When disabled, users cannot choose the chat model and cannot see which model is in use — the model name and avatar are replaced with the app name.'
+						)}
+					>
+						{$i18n.t('Allow Model Selection')}
+					</Tooltip>
+				</div>
+				<Switch bind:state={permissions.chat.model_selection} />
+			</div>
+			{#if defaultPermissions?.chat?.model_selection && !permissions.chat.model_selection}
 				<div>
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}

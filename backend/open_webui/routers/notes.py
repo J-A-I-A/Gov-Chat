@@ -222,6 +222,7 @@ async def create_new_note(
         form_data.access_grants,
         'sharing.public_notes',
         db=db,
+        group_scope_permission_key='sharing.notes_outside_group',
     )
 
     try:
@@ -338,6 +339,7 @@ async def update_note_by_id(
         form_data.access_grants,
         'sharing.public_notes',
         db=db,
+        group_scope_permission_key='sharing.notes_outside_group',
     )
 
     try:
@@ -404,6 +406,7 @@ async def update_note_access_by_id(
         user.role,
         form_data.access_grants,
         'sharing.public_notes',
+        group_scope_permission_key='sharing.notes_outside_group',
     )
 
     await AccessGrants.set_access_grants('note', id, form_data.access_grants, db=db)

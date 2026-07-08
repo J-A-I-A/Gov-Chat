@@ -123,7 +123,16 @@
 			"
 				>
 					{#if showModelSelector}
-						<ModelSelector bind:selectedModels showSetDefault={!shareEnabled} />
+						{#if $user?.role === 'admin' || ($user?.permissions?.chat?.model_selection ?? false)}
+							<ModelSelector bind:selectedModels showSetDefault={!shareEnabled} />
+						{:else}
+							<!-- Model selection/visibility not permitted: show the app name instead of the model. -->
+							<div
+								class="self-center font-medium text-lg text-gray-900 dark:text-gray-100 line-clamp-1 px-1"
+							>
+								{$WEBUI_NAME}
+							</div>
+						{/if}
 					{/if}
 				</div>
 

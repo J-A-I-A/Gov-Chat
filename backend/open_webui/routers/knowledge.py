@@ -270,6 +270,7 @@ async def create_new_knowledge(
         user.role,
         form_data.access_grants,
         'sharing.public_knowledge',
+        group_scope_permission_key='sharing.knowledge_outside_group',
     )
 
     knowledge = await Knowledges.insert_new_knowledge(user.id, form_data)
@@ -474,6 +475,7 @@ async def update_knowledge_by_id(
         user.role,
         form_data.access_grants,
         'sharing.public_knowledge',
+        group_scope_permission_key='sharing.knowledge_outside_group',
     )
 
     knowledge = await Knowledges.update_knowledge_by_id(id=id, form_data=form_data)
@@ -542,6 +544,7 @@ async def update_knowledge_access_by_id(
         user.role,
         form_data.access_grants,
         'sharing.public_knowledge',
+        group_scope_permission_key='sharing.knowledge_outside_group',
     )
 
     knowledge.access_grants = await AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)

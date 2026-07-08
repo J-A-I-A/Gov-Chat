@@ -123,6 +123,9 @@
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
+	// Non-admins may only see/choose the chat model if an admin allows it.
+	$: canSeeModel = $_user?.role === 'admin' || ($_user?.permissions?.chat?.model_selection ?? false);
+
 	export let history;
 	export let taskIds = null;
 
@@ -1300,7 +1303,7 @@
 								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
-							{#if atSelectedModel !== undefined}
+							{#if atSelectedModel !== undefined && canSeeModel}
 								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
 									<div class="flex items-center justify-between w-full">
 										<div class="pl-[1px] flex items-center gap-2 text-sm dark:text-gray-500">
