@@ -209,6 +209,13 @@ def migrate_access_control(data: dict, ac_key: str = 'access_control', grants_ke
     data.pop(ac_key, None)
 
 
+def _grant_field(grant: Any, field: str) -> Any:
+    """Read a field from a grant that may be a dict or a pydantic/object grant."""
+    if isinstance(grant, dict):
+        return grant.get(field)
+    return getattr(grant, field, None)
+
+
 async def filter_allowed_access_grants(
     default_permissions: dict[str, Any],
     user_id: str,
@@ -216,13 +223,41 @@ async def filter_allowed_access_grants(
     access_grants: list,
     public_permission_key: str,
     db: AsyncSession | None = None,
+    group_scope_permission_key: str | None = None,
+    user_group_ids: set[str] | None = None,
 ) -> list:
     """
     Checks if the user has the required permissions to grant access to a resource.
     Returns the filtered list of access grants if permissions are missing.
+
+    When ``group_scope_permission_key`` is provided and the user lacks that
+    permission, sharing is confined to the groups the user belongs to: every
+    grant to another group, to an individual user, or to the public (user:*) is
+    stripped. This enforces the "no sharing outside your group" default for
+    non-admins. Admins and users who hold the permission are unaffected.
     """
     if user_role == 'admin' or not access_grants:
         return access_grants
+
+    # Restrict sharing to the user's own groups unless they are explicitly
+    # permitted to share more broadly. This overrides the public/user checks
+    # below because it is the strictest possible policy.
+    if group_scope_permission_key and not await has_permission(
+        user_id,
+        group_scope_permission_key,
+        default_permissions,
+        db=db,
+    ):
+        if user_group_ids is None:
+            user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+            user_group_ids = {group.id for group in user_groups}
+
+        return [
+            grant
+            for grant in access_grants
+            if _grant_field(grant, 'principal_type') == 'group'
+            and _grant_field(grant, 'principal_id') in user_group_ids
+        ]
 
     # Check if user can share publicly
     if (

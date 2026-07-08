@@ -5,6 +5,11 @@
 	import Skills from './Commands/Skills.svelte';
 	import Emojis from './Commands/Emojis.svelte';
 
+	import { user } from '$lib/stores';
+
+	// Non-admins may only browse/mention models via "@" if an admin allows it.
+	$: canSeeModel = $user?.role === 'admin' || ($user?.permissions?.chat?.model_selection ?? false);
+
 	export let char = '';
 	export let query = '';
 	export let command: (payload: { id: string; label: string }) => void;
@@ -97,7 +102,7 @@
 					}
 				}}
 			/>
-		{:else if char === '@'}
+		{:else if char === '@' && canSeeModel}
 			<Models
 				bind:this={suggestionElement}
 				{query}

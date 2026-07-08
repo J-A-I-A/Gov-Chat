@@ -2688,12 +2688,25 @@ USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING = (
     os.getenv('USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
 )
 
+# Security default: non-admin users may only share knowledge bases with groups they
+# themselves belong to. When disabled (the default), any grant to another group, to an
+# individual user, or to the public is stripped on save. An admin can grant a group this
+# permission to let its members share knowledge beyond their own groups.
+USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING_OUTSIDE_GROUP = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING_OUTSIDE_GROUP', 'False').lower() == 'true'
+)
+
 USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING = (
     os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING', 'False').lower() == 'true'
 )
 
 USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING = (
     os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
+)
+
+# Security default: non-admins may only share prompts with groups they belong to.
+USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING_OUTSIDE_GROUP = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING_OUTSIDE_GROUP', 'False').lower() == 'true'
 )
 
 
@@ -2703,6 +2716,11 @@ USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING = (
 
 USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING = (
     os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
+)
+
+# Security default: non-admins may only share tools with groups they belong to.
+USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING_OUTSIDE_GROUP = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING_OUTSIDE_GROUP', 'False').lower() == 'true'
 )
 
 USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING = (
@@ -2718,6 +2736,11 @@ USER_PERMISSIONS_NOTES_ALLOW_SHARING = os.getenv('USER_PERMISSIONS_NOTES_ALLOW_S
 
 USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING = (
     os.getenv('USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
+)
+
+# Security default: non-admins may only share notes with groups they belong to.
+USER_PERMISSIONS_NOTES_ALLOW_SHARING_OUTSIDE_GROUP = (
+    os.getenv('USER_PERMISSIONS_NOTES_ALLOW_SHARING_OUTSIDE_GROUP', 'False').lower() == 'true'
 )
 
 USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING = (
@@ -2770,6 +2793,14 @@ USER_PERMISSIONS_CHAT_TTS = os.getenv('USER_PERMISSIONS_CHAT_TTS', 'True').lower
 USER_PERMISSIONS_CHAT_CALL = os.getenv('USER_PERMISSIONS_CHAT_CALL', 'True').lower() == 'true'
 
 USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = os.getenv('USER_PERMISSIONS_CHAT_MULTIPLE_MODELS', 'True').lower() == 'true'
+
+# Security default: non-admins cannot choose the chat model or even see which model is
+# in use. When disabled (the default), the model selector is hidden and the model name /
+# avatar is replaced with the app name everywhere. An admin can grant a group this
+# permission to reveal and allow model selection.
+USER_PERMISSIONS_CHAT_MODEL_SELECTION = (
+    os.getenv('USER_PERMISSIONS_CHAT_MODEL_SELECTION', 'False').lower() == 'true'
+)
 
 USER_PERMISSIONS_CHAT_TEMPORARY = os.getenv('USER_PERMISSIONS_CHAT_TEMPORARY', 'True').lower() == 'true'
 
@@ -2829,14 +2860,18 @@ DEFAULT_USER_PERMISSIONS = {
         'public_models': USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING,
         'knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING,
         'public_knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING,
+        'knowledge_outside_group': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING_OUTSIDE_GROUP,
         'prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING,
         'public_prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING,
+        'prompts_outside_group': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING_OUTSIDE_GROUP,
         'tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING,
         'public_tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING,
+        'tools_outside_group': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING_OUTSIDE_GROUP,
         'skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING,
         'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
         'notes': USER_PERMISSIONS_NOTES_ALLOW_SHARING,
         'public_notes': USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING,
+        'notes_outside_group': USER_PERMISSIONS_NOTES_ALLOW_SHARING_OUTSIDE_GROUP,
         'public_chats': USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING,
         'public_calendars': USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING,
     },
@@ -2862,6 +2897,7 @@ DEFAULT_USER_PERMISSIONS = {
         'tts': USER_PERMISSIONS_CHAT_TTS,
         'call': USER_PERMISSIONS_CHAT_CALL,
         'multiple_models': USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
+        'model_selection': USER_PERMISSIONS_CHAT_MODEL_SELECTION,
         'temporary': USER_PERMISSIONS_CHAT_TEMPORARY,
         'temporary_enforced': USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED,
     },

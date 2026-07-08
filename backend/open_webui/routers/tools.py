@@ -361,6 +361,7 @@ async def create_new_tools(
                 user.role,
                 form_data.access_grants,
                 'sharing.public_tools',
+                group_scope_permission_key='sharing.tools_outside_group',
             )
 
             form_data.content = replace_imports(form_data.content)
@@ -508,6 +509,7 @@ async def update_tools_by_id(
             user.role,
             form_data.access_grants,
             'sharing.public_tools',
+            group_scope_permission_key='sharing.tools_outside_group',
         )
 
         updated = {
@@ -579,6 +581,7 @@ async def update_tool_access_by_id(
         user.role,
         form_data.access_grants,
         'sharing.public_tools',
+        group_scope_permission_key='sharing.tools_outside_group',
     )
 
     await AccessGrants.set_access_grants('tool', id, form_data.access_grants, db=db)
