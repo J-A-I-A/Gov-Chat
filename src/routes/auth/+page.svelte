@@ -14,7 +14,8 @@
 		getSessionUser,
 		userSignIn,
 		userSignUp,
-		updateUserTimezone
+		updateUserTimezone,
+		requestPasswordReset
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -68,6 +69,8 @@
 		}
 	};
 
+	let resetLinkSent = false;
+
 	const signInHandler = async () => {
 		const sessionUser = await userSignIn(email, password).catch((error) => {
 			toast.error(`${error}`);
@@ -75,6 +78,20 @@
 		});
 
 		await setSessionUser(sessionUser);
+	};
+
+	const resetHandler = async () => {
+		const res = await requestPasswordReset(email).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			resetLinkSent = true;
+			toast.success(
+				$i18n.t('If an account with that email exists, a password reset link has been sent.')
+			);
+		}
 	};
 
 	const signUpHandler = async () => {
@@ -108,6 +125,8 @@
 			await ldapSignInHandler();
 		} else if (mode === 'signin') {
 			await signInHandler();
+		} else if (mode === 'reset') {
+			await resetHandler();
 		} else {
 			await signUpHandler();
 		}
@@ -283,6 +302,8 @@
 											{$i18n.t(`Sign in to {{WEBUI_NAME}} with LDAP`, { WEBUI_NAME: $WEBUI_NAME })}
 										{:else if mode === 'signin'}
 											{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+										{:else if mode === 'reset'}
+											{$i18n.t('Reset your password')}
 										{:else}
 											{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 										{/if}
@@ -351,23 +372,40 @@
 											</div>
 										{/if}
 
-										<div>
-											<label for="password" class="text-sm font-medium text-left mb-1 block"
-												>{$i18n.t('Password')}</label
-											>
-											<SensitiveInput
-												bind:value={password}
-												type="password"
-												id="password"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
-												placeholder={$i18n.t('Enter Your Password')}
-												autocomplete={mode === 'signup' ? 'new-password' : 'current-password'}
-												name="password"
-												screenReader={true}
-												required
-												aria-required="true"
-											/>
-										</div>
+										{#if mode !== 'reset'}
+											<div>
+												<label for="password" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Password')}</label
+												>
+												<SensitiveInput
+													bind:value={password}
+													type="password"
+													id="password"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+													placeholder={$i18n.t('Enter Your Password')}
+													autocomplete={mode === 'signup' ? 'new-password' : 'current-password'}
+													name="password"
+													screenReader={true}
+													required
+													aria-required="true"
+												/>
+											</div>
+
+											{#if mode === 'signin' && $config?.features?.enable_password_reset}
+												<div class="mt-1.5 text-right">
+													<button
+														class="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+														type="button"
+														on:click={() => {
+															resetLinkSent = false;
+															mode = 'reset';
+														}}
+													>
+														{$i18n.t('Forgot password?')}
+													</button>
+												</div>
+											{/if}
+										{/if}
 
 										{#if mode === 'signup' && $config?.features?.enable_signup_password_confirmation}
 											<div class="mt-2">
@@ -404,14 +442,30 @@
 												class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
 												type="submit"
 											>
-												{mode === 'signin'
-													? $i18n.t('Sign in')
-													: ($config?.onboarding ?? false)
-														? $i18n.t('Create Admin Account')
-														: $i18n.t('Create Account')}
+												{#if mode === 'reset'}
+													{$i18n.t('Send reset link')}
+												{:else if mode === 'signin'}
+													{$i18n.t('Sign in')}
+												{:else if $config?.onboarding ?? false}
+													{$i18n.t('Create Admin Account')}
+												{:else}
+													{$i18n.t('Create Account')}
+												{/if}
 											</button>
 
-											{#if $config?.features.enable_signup && !($config?.onboarding ?? false)}
+											{#if mode === 'reset'}
+												<div class=" mt-4 text-sm text-center">
+													<button
+														class=" font-medium underline"
+														type="button"
+														on:click={() => {
+															mode = 'signin';
+														}}
+													>
+														{$i18n.t('Back to sign in')}
+													</button>
+												</div>
+											{:else if $config?.features.enable_signup && !($config?.onboarding ?? false)}
 												<div class=" mt-4 text-sm text-center">
 													{mode === 'signin'
 														? $i18n.t("Don't have an account?")

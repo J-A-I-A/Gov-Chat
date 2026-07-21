@@ -8,14 +8,17 @@
 		updateLdapConfig,
 		updateLdapServer,
 		updateOAuthConfig,
-		updateAdminConfig
+		updateAdminConfig,
+		getSmtpConfig,
+		updateSmtpConfig,
+		sendTestEmail
 	} from '$lib/apis/auths';
 	import { getGroups } from '$lib/apis/groups';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { config } from '$lib/stores';
+	import { config, WEBUI_NAME } from '$lib/stores';
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -41,6 +44,43 @@
 	};
 
 	let oauthConfig: any = null;
+
+	let SMTP_CONFIG = {
+		enable: false,
+		host: '',
+		port: 587,
+		username: '',
+		password: '',
+		from_email: '',
+		from_name: '',
+		use_tls: true,
+		use_ssl: false
+	};
+
+	const updateSmtpHandler = async () => {
+		const res = await updateSmtpConfig(localStorage.token, SMTP_CONFIG).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res) {
+			SMTP_CONFIG = res;
+		}
+		return !!res;
+	};
+
+	const sendTestEmailHandler = async () => {
+		// Persist current settings first so the test uses what the admin sees.
+		const saved = await updateSmtpHandler();
+		if (!saved) return;
+
+		const res = await sendTestEmail(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res) {
+			toast.success($i18n.t('Test email sent. Check your inbox.'));
+		}
+	};
 
 	const updateLdapServerHandler = async () => {
 		await updateLdapConfig(localStorage.token, ENABLE_LDAP);
@@ -79,8 +119,9 @@
 		const adminSaved = await updateAdminHandler();
 		const ldapSaved = await updateLdapServerHandler();
 		const oauthSaved = await updateOAuthHandler();
+		const smtpSaved = await updateSmtpHandler();
 
-		if (adminSaved && ldapSaved && oauthSaved) {
+		if (adminSaved && ldapSaved && oauthSaved && smtpSaved) {
 			toast.success($i18n.t('Settings saved successfully!'));
 			await config.set(await getBackendConfig());
 		}
@@ -99,6 +140,12 @@
 			})(),
 			(async () => {
 				oauthConfig = await getOAuthConfig(localStorage.token).catch(() => null);
+			})(),
+			(async () => {
+				const smtp = await getSmtpConfig(localStorage.token).catch(() => null);
+				if (smtp) {
+					SMTP_CONFIG = smtp;
+				}
 			})()
 		]);
 
@@ -500,6 +547,117 @@
 				{/if}
 			</div>
 		</div>
+		<div class="mb-3">
+			<div class="flex justify-between items-center text-sm">
+				<div class="mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Email (SMTP)')}</div>
+				<div class="mt-1">
+					<Switch bind:state={SMTP_CONFIG.enable} />
+				</div>
+			</div>
+
+			<hr class="border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+			<div class="text-xs text-gray-400 dark:text-gray-500 mb-2">
+				{$i18n.t(
+					'Configure an SMTP server to send account setup and password reset emails to users.'
+				)}
+			</div>
+
+			{#if SMTP_CONFIG.enable}
+				<div class="flex flex-col gap-2 pr-1.5">
+					<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+						<div class="w-full sm:col-span-2">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('Host')}</div>
+							<input
+								class="w-full bg-transparent outline-hidden py-0.5"
+								placeholder={$i18n.t('e.g. smtp.gmail.com')}
+								bind:value={SMTP_CONFIG.host}
+							/>
+						</div>
+						<div class="w-full">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('Port')}</div>
+							<input
+								class="w-full bg-transparent outline-hidden py-0.5"
+								type="number"
+								placeholder="587"
+								bind:value={SMTP_CONFIG.port}
+							/>
+						</div>
+					</div>
+
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+						<div class="w-full">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('Username')}</div>
+							<input
+								class="w-full bg-transparent outline-hidden py-0.5"
+								placeholder={$i18n.t('SMTP username')}
+								autocomplete="off"
+								bind:value={SMTP_CONFIG.username}
+							/>
+						</div>
+						<div class="w-full">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('Password')}</div>
+							<SensitiveInput
+								placeholder={$i18n.t('Leave blank to keep current password')}
+								required={false}
+								bind:value={SMTP_CONFIG.password}
+							/>
+						</div>
+					</div>
+
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+						<div class="w-full">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('From Email')}</div>
+							<input
+								class="w-full bg-transparent outline-hidden py-0.5"
+								type="email"
+								placeholder={$i18n.t('no-reply@example.com')}
+								bind:value={SMTP_CONFIG.from_email}
+							/>
+						</div>
+						<div class="w-full">
+							<div class="self-center text-xs font-medium min-w-fit mb-1">{$i18n.t('From Name')}</div>
+							<input
+								class="w-full bg-transparent outline-hidden py-0.5"
+								placeholder={$WEBUI_NAME}
+								bind:value={SMTP_CONFIG.from_name}
+							/>
+						</div>
+					</div>
+
+					<div class="flex w-full justify-between pr-2 mt-1">
+						<Tooltip
+							content={$i18n.t('Use STARTTLS on a plaintext connection (typically port 587).')}
+							placement="top-start"
+						>
+							<div class="self-center text-xs font-medium">{$i18n.t('Use TLS (STARTTLS)')}</div>
+						</Tooltip>
+						<Switch bind:state={SMTP_CONFIG.use_tls} />
+					</div>
+
+					<div class="flex w-full justify-between pr-2">
+						<Tooltip
+							content={$i18n.t('Use implicit SSL from connect (typically port 465).')}
+							placement="top-start"
+						>
+							<div class="self-center text-xs font-medium">{$i18n.t('Use SSL')}</div>
+						</Tooltip>
+						<Switch bind:state={SMTP_CONFIG.use_ssl} />
+					</div>
+
+					<div class="flex justify-end mt-1">
+						<button
+							class="px-3 py-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-full"
+							type="button"
+							on:click={sendTestEmailHandler}
+						>
+							{$i18n.t('Send test email')}
+						</button>
+					</div>
+				</div>
+			{/if}
+		</div>
+
 		{#if oauthConfig}
 			<div class="mb-3">
 				<div class="mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('OAuth / OIDC')}</div>

@@ -92,6 +92,10 @@ class SignupForm(BaseModel):
 
 class AddUserForm(SignupForm):
     role: str | None = 'pending'
+    # When True, ignore any supplied password: generate a random internal one and
+    # email the new user a one-time link to set their own password.
+    send_setup_email: bool | None = False
+    password: str | None = ''
 
 
 # --- data-access layer ---

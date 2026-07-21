@@ -2778,6 +2778,30 @@ ENABLE_LDAP_GROUP_CREATION = os.getenv('ENABLE_LDAP_GROUP_CREATION', 'False').lo
 
 LDAP_ATTRIBUTE_FOR_GROUPS = os.getenv('LDAP_ATTRIBUTE_FOR_GROUPS', 'memberOf')
 
+####################################
+# Email / SMTP
+####################################
+
+ENABLE_EMAIL = os.getenv('ENABLE_EMAIL', 'False').lower() == 'true'
+
+SMTP_HOST = os.getenv('SMTP_HOST', '')
+
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+
+SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
+
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
+
+SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', os.getenv('ADMIN_EMAIL', '') or '')
+
+SMTP_FROM_NAME = os.getenv('SMTP_FROM_NAME', WEBUI_NAME)
+
+# STARTTLS on a plaintext connection (typically port 587).
+SMTP_USE_TLS = os.getenv('SMTP_USE_TLS', 'True').lower() == 'true'
+
+# Implicit TLS / SSL from connect (typically port 465). Mutually exclusive with STARTTLS.
+SMTP_USE_SSL = os.getenv('SMTP_USE_SSL', 'False').lower() == 'true'
+
 DEFAULT_CONFIG = {
     'direct.enable': ENABLE_DIRECT_CONNECTIONS,
     'ollama.enable': ENABLE_OLLAMA_API,
@@ -3159,6 +3183,15 @@ DEFAULT_CONFIG = {
     'ldap.group.enable_management': ENABLE_LDAP_GROUP_MANAGEMENT,
     'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
     'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
+    'smtp.enable': ENABLE_EMAIL,
+    'smtp.host': SMTP_HOST,
+    'smtp.port': SMTP_PORT,
+    'smtp.username': SMTP_USERNAME,
+    'smtp.password': SMTP_PASSWORD,
+    'smtp.from_email': SMTP_FROM_EMAIL,
+    'smtp.from_name': SMTP_FROM_NAME,
+    'smtp.use_tls': SMTP_USE_TLS,
+    'smtp.use_ssl': SMTP_USE_SSL,
 }
 
 

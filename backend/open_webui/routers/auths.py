@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import re
+import secrets
 import time
 import urllib
 import uuid
@@ -33,6 +34,7 @@ from open_webui.env import (
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_AUTH_TRUSTED_ROLE_HEADER,
 )
+from open_webui.env import WEBUI_NAME
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import (
     AddUserForm,
@@ -46,6 +48,7 @@ from open_webui.models.auths import (
     UpdatePasswordForm,
 )
 from open_webui.models.config import Config
+from open_webui.models.password_reset import PasswordResetTokens
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
@@ -68,6 +71,12 @@ from open_webui.utils.auth import (
     invalidate_token,
     validate_password,
     verify_password,
+)
+from open_webui.utils.email import (
+    EmailNotConfiguredError,
+    build_set_password_email,
+    is_email_configured,
+    send_email,
 )
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.misc import parse_duration, validate_email_format
@@ -129,6 +138,28 @@ LDAP_SERVER_CONFIG_KEYS = {
     'validate_cert': 'ldap.server.validate_cert',
     'ciphers': 'ldap.server.ciphers',
 }
+
+SMTP_CONFIG_KEYS = {
+    'enable': 'smtp.enable',
+    'host': 'smtp.host',
+    'port': 'smtp.port',
+    'username': 'smtp.username',
+    'password': 'smtp.password',
+    'from_email': 'smtp.from_email',
+    'from_name': 'smtp.from_name',
+    'use_tls': 'smtp.use_tls',
+    'use_ssl': 'smtp.use_ssl',
+}
+
+# How long password-reset / account-setup links stay valid.
+PASSWORD_RESET_TTL_SECONDS = 60 * 60  # 1 hour
+ACCOUNT_SETUP_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+
+
+async def _password_link_base(request: Request) -> str:
+    """Public base URL for links embedded in emails (configured URL, else request origin)."""
+    webui_url = await Config.get('webui.url')
+    return str(webui_url or request.base_url).rstrip('/')
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
@@ -396,6 +427,100 @@ async def update_password(
             raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+
+############################
+# Password Reset (via email)
+############################
+
+
+class PasswordResetRequestForm(BaseModel):
+    email: str
+
+
+class SetPasswordForm(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post('/password/reset/request', response_model=bool)
+async def request_password_reset(
+    request: Request,
+    form_data: PasswordResetRequestForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Send a password-reset link to the user's email.
+
+    Always returns True regardless of whether the account exists, so the endpoint
+    cannot be used to enumerate registered emails.
+    """
+    email = (form_data.email or '').lower().strip()
+
+    # Rate-limit by email to blunt enumeration / mail-bombing.
+    if email and signin_rate_limiter.is_limited(f'pwreset:{email}'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    # Password reset only applies to local password auth.
+    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER or not email or not validate_email_format(email):
+        return True
+
+    if not await is_email_configured():
+        return True
+
+    user = await Users.get_user_by_email(email, db=db)
+    if user:
+        try:
+            raw_token = await PasswordResetTokens.create(user.id, PASSWORD_RESET_TTL_SECONDS, db=db)
+            base = await _password_link_base(request)
+            reset_url = f'{base}/auth/reset-password?token={urllib.parse.quote(raw_token)}'
+            subject, html_body, text_body = build_set_password_email(user.name, reset_url, 'reset', WEBUI_NAME)
+            await send_email(user.email, subject, html_body, text_body)
+        except Exception as err:
+            # Do not reveal delivery failures to unauthenticated callers.
+            log.error('Password reset email failed for %s: %s', email, str(err))
+
+    return True
+
+
+@router.post('/password/set', response_model=bool)
+async def set_password(
+    request: Request,
+    form_data: SetPasswordForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Set a new password using a one-time reset / account-setup token."""
+    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+    if signin_rate_limiter.is_limited('pwset:token'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    try:
+        validate_password(form_data.new_password)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e))
+
+    user_id = await PasswordResetTokens.verify_and_consume(form_data.token, db=db)
+    if not user_id:
+        raise HTTPException(400, detail='This link is invalid or has expired.')
+
+    user = await Users.get_user_by_id(user_id, db=db)
+    if not user:
+        raise HTTPException(400, detail='This link is invalid or has expired.')
+
+    hashed = await get_password_hash(form_data.new_password)
+    success = await Auths.update_user_password_by_id(user_id, hashed, db=db)
+    if not success:
+        raise HTTPException(500, detail='Failed to update password.')
+
+    await publish_event(
+        request,
+        EVENTS.AUTH_PASSWORD_CHANGED,
+        actor=user,
+        subject_id=user.id,
+        subject_type='user',
+    )
+    return True
 
 
 ############################
@@ -1028,13 +1153,25 @@ async def add_user(
     if await Users.get_user_by_email(form_data.email.lower(), db=db):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
-    try:
-        try:
-            validate_password(form_data.password)
-        except Exception as e:
-            raise HTTPException(400, detail=str(e))
+    send_setup_email = bool(form_data.send_setup_email)
 
-        hashed = await get_password_hash(form_data.password)
+    try:
+        if send_setup_email:
+            # Admin opted to email the user a set-password link instead of choosing
+            # a password. Require email delivery to be available first.
+            if not await is_email_configured():
+                raise HTTPException(400, detail='SMTP is not enabled or configured.')
+            # A random internal password satisfies the auth record; the user never
+            # sees it and replaces it via the setup link.
+            password = secrets.token_urlsafe(24)
+        else:
+            password = form_data.password or ''
+            try:
+                validate_password(password)
+            except Exception as e:
+                raise HTTPException(400, detail=str(e))
+
+        hashed = await get_password_hash(password)
         user = await Auths.insert_new_auth(
             form_data.email.lower(),
             hashed,
@@ -1058,6 +1195,24 @@ async def add_user(
                 source='admin',
                 data={'role': user.role},
             )
+
+            if send_setup_email:
+                try:
+                    raw_token = await PasswordResetTokens.create(user.id, ACCOUNT_SETUP_TTL_SECONDS, db=db)
+                    base = await _password_link_base(request)
+                    setup_url = f'{base}/auth/reset-password?token={urllib.parse.quote(raw_token)}'
+                    subject, html_body, text_body = build_set_password_email(
+                        user.name, setup_url, 'setup', WEBUI_NAME
+                    )
+                    await send_email(user.email, subject, html_body, text_body)
+                except Exception as err:
+                    # The account exists; surface the delivery failure so the admin
+                    # can resend, but don't roll back the user.
+                    log.error('Account setup email failed for %s: %s', user.email, str(err))
+                    raise HTTPException(
+                        500,
+                        detail='User created, but the setup email could not be sent. Check SMTP settings.',
+                    )
 
             expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
             token = create_token(data={'id': user.id}, expires_delta=expires_delta)
@@ -1229,6 +1384,83 @@ class LdapConfigForm(BaseModel):
 async def update_ldap_config(request: Request, form_data: LdapConfigForm, user=Depends(get_admin_user)):
     await Config.upsert({'ldap.enable': form_data.enable_ldap})
     return {'ENABLE_LDAP': await Config.get('ldap.enable')}
+
+
+############################
+# SMTP / Email Config
+############################
+
+
+class SmtpConfig(BaseModel):
+    enable: bool = False
+    host: str = ''
+    port: int | None = 587
+    username: str = ''
+    # Write-only: GET always returns '' and POST only overwrites when a value is sent.
+    password: str = ''
+    from_email: str = ''
+    from_name: str = ''
+    use_tls: bool = True
+    use_ssl: bool = False
+
+
+@router.get('/admin/config/smtp', response_model=SmtpConfig)
+async def get_smtp_config(request: Request, user=Depends(get_admin_user)):
+    values = await get_config_values(SMTP_CONFIG_KEYS)
+    # Never expose the stored SMTP password to the browser.
+    values['password'] = ''
+    return values
+
+
+@router.post('/admin/config/smtp', response_model=SmtpConfig)
+async def update_smtp_config(request: Request, form_data: SmtpConfig, user=Depends(get_admin_user)):
+    if form_data.enable and (not form_data.host or not form_data.from_email):
+        raise HTTPException(400, detail='SMTP host and From address are required to enable email.')
+
+    updates = config_updates(form_data.model_dump(), SMTP_CONFIG_KEYS)
+    updates['smtp.port'] = int(form_data.port) if form_data.port else 587
+    # Write-only password: only overwrite when the admin actually typed something.
+    if form_data.password:
+        updates['smtp.password'] = form_data.password
+    else:
+        updates.pop('smtp.password', None)
+
+    await Config.upsert(updates)
+
+    result = await get_config_values(SMTP_CONFIG_KEYS)
+    result['password'] = ''
+    return result
+
+
+class SmtpTestForm(BaseModel):
+    to_email: str | None = None
+
+
+@router.post('/admin/config/smtp/test', response_model=bool)
+async def test_smtp_config(request: Request, form_data: SmtpTestForm, user=Depends(get_admin_user)):
+    """Send a test email (defaults to the requesting admin's address)."""
+    to_email = (form_data.to_email or user.email or '').lower().strip()
+    if not to_email or not validate_email_format(to_email):
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
+
+    if not await is_email_configured():
+        raise HTTPException(400, detail='SMTP is not enabled or configured.')
+
+    html_body = (
+        '<div style="font-family:sans-serif">'
+        f'<p>This is a test email from <b>{WEBUI_NAME}</b>.</p>'
+        '<p>If you received this, your SMTP settings are working.</p>'
+        '</div>'
+    )
+    try:
+        await send_email(to_email, f'{WEBUI_NAME} SMTP test', html_body, 'SMTP test — your settings are working.')
+    except EmailNotConfiguredError:
+        raise HTTPException(400, detail='SMTP is not enabled or configured.')
+    except Exception as err:
+        log.error('SMTP test failed: %s', str(err))
+        raise HTTPException(400, detail=f'Failed to send test email: {err}')
+
+    return True
 
 
 ############################

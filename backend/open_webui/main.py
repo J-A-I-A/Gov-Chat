@@ -1854,6 +1854,7 @@ async def get_app_config(request: Request):
     config = await Config.get_many(
         'oauth.auto_redirect',
         'ldap.enable',
+        'smtp.enable',
         'ui.enable_signup',
         'ui.enable_login_form',
         'auth.enable_api_keys',
@@ -1914,6 +1915,7 @@ async def get_app_config(request: Request):
             'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
             'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
             'enable_ldap': config.get('ldap.enable'),
+            'enable_password_reset': config.get('smtp.enable'),
             'enable_signup': config.get('ui.enable_signup'),
             'enable_login_form': config.get('ui.enable_login_form'),
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
