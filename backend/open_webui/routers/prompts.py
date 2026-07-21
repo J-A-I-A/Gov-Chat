@@ -5,8 +5,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
+from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.prompt_history import (
     PromptHistories,
@@ -149,13 +151,13 @@ async def create_new_prompt(
         await has_permission(
             user.id,
             'workspace.prompts',
-            request.app.state.config.USER_PERMISSIONS,
+            await Config.get('user.permissions'),
             db=db,
         )
         or await has_permission(
             user.id,
             'workspace.prompts_import',
-            request.app.state.config.USER_PERMISSIONS,
+            await Config.get('user.permissions'),
             db=db,
         )
     ):
@@ -165,7 +167,7 @@ async def create_new_prompt(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-        request.app.state.config.USER_PERMISSIONS,
+        await Config.get('user.permissions'),
         user.id,
         user.role,
         form_data.access_grants,
@@ -178,6 +180,13 @@ async def create_new_prompt(
         prompt = await Prompts.insert_new_prompt(user.id, form_data, db=db)
 
         if prompt:
+            await publish_event(
+                request,
+                EVENTS.PROMPT_CREATED,
+                actor=user,
+                subject_id=prompt.id,
+                data={'name': prompt.name, 'command': prompt.command},
+            )
             return prompt
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -282,7 +291,7 @@ async def update_prompt_by_id(
             )
 
     form_data.access_grants = await filter_allowed_access_grants(
-        request.app.state.config.USER_PERMISSIONS,
+        await Config.get('user.permissions'),
         user.id,
         user.role,
         form_data.access_grants,
@@ -293,6 +302,13 @@ async def update_prompt_by_id(
     # Use the ID from the found prompt
     updated_prompt = await Prompts.update_prompt_by_id(prompt.id, form_data, user.id, db=db)
     if updated_prompt:
+        await publish_event(
+            request,
+            EVENTS.PROMPT_UPDATED,
+            actor=user,
+            subject_id=updated_prompt.id,
+            data={'name': updated_prompt.name, 'command': updated_prompt.command},
+        )
         return updated_prompt
     else:
         raise HTTPException(
@@ -308,6 +324,7 @@ async def update_prompt_by_id(
 
 @router.post('/id/{prompt_id}/update/meta', response_model=PromptModel | None)
 async def update_prompt_metadata(
+    request: Request,
     prompt_id: str,
     form_data: PromptMetadataForm,
     user=Depends(get_verified_user),
@@ -351,6 +368,13 @@ async def update_prompt_metadata(
         prompt.id, form_data.name, form_data.command, form_data.tags, db=db
     )
     if updated_prompt:
+        await publish_event(
+            request,
+            EVENTS.PROMPT_UPDATED,
+            actor=user,
+            subject_id=updated_prompt.id,
+            data={'name': updated_prompt.name, 'command': updated_prompt.command},
+        )
         return updated_prompt
     else:
         raise HTTPException(
@@ -361,6 +385,7 @@ async def update_prompt_metadata(
 
 @router.post('/id/{prompt_id}/update/version', response_model=PromptModel | None)
 async def set_prompt_version(
+    request: Request,
     prompt_id: str,
     form_data: PromptVersionUpdateForm,
     user=Depends(get_verified_user),
@@ -391,6 +416,13 @@ async def set_prompt_version(
 
     updated_prompt = await Prompts.update_prompt_version(prompt.id, form_data.version_id, db=db)
     if updated_prompt:
+        await publish_event(
+            request,
+            EVENTS.PROMPT_VERSION_UPDATED,
+            actor=user,
+            subject_id=updated_prompt.id,
+            data={'version_id': updated_prompt.version_id},
+        )
         return updated_prompt
     else:
         raise HTTPException(
@@ -440,7 +472,7 @@ async def update_prompt_access_by_id(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-        request.app.state.config.USER_PERMISSIONS,
+        await Config.get('user.permissions'),
         user.id,
         user.role,
         form_data.access_grants,
@@ -450,7 +482,15 @@ async def update_prompt_access_by_id(
 
     await AccessGrants.set_access_grants('prompt', prompt_id, form_data.access_grants, db=db)
 
-    return await Prompts.get_prompt_by_id(prompt_id, db=db)
+    updated_prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
+    await publish_event(
+        request,
+        EVENTS.PROMPT_ACCESS_UPDATED,
+        actor=user,
+        subject_id=prompt_id,
+        data={'name': updated_prompt.name if updated_prompt else None},
+    )
+    return updated_prompt
 
 
 ############################
@@ -460,7 +500,10 @@ async def update_prompt_access_by_id(
 
 @router.post('/id/{prompt_id}/toggle', response_model=PromptModel | None)
 async def toggle_prompt_active(
-    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+    request: Request,
+    prompt_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
 ):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
@@ -488,6 +531,14 @@ async def toggle_prompt_active(
 
     result = await Prompts.toggle_prompt_active(prompt.id, db=db)
     if result:
+        await publish_event(
+            request,
+            EVENTS.PROMPT_ENABLED if result.is_active else EVENTS.PROMPT_DISABLED,
+            actor=user,
+            subject_id=result.id,
+            subject_type='prompt',
+            data={'name': result.name, 'command': result.command},
+        )
         return result
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -502,7 +553,10 @@ async def toggle_prompt_active(
 
 @router.delete('/id/{prompt_id}/delete', response_model=bool)
 async def delete_prompt_by_id(
-    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+    request: Request,
+    prompt_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
 ):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
@@ -529,6 +583,14 @@ async def delete_prompt_by_id(
         )
 
     result = await Prompts.delete_prompt_by_id(prompt.id, db=db)
+    if result:
+        await publish_event(
+            request,
+            EVENTS.PROMPT_DELETED,
+            actor=user,
+            subject_id=prompt.id,
+            data={'name': prompt.name, 'command': prompt.command},
+        )
     return result
 
 

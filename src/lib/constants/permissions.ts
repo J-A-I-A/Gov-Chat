@@ -10,7 +10,9 @@ export const DEFAULT_PERMISSIONS = {
 		prompts_import: false,
 		prompts_export: false,
 		tools_import: false,
-		tools_export: false
+		tools_export: false,
+		skills_import: false,
+		skills_export: false
 	},
 	sharing: {
 		models: false,
@@ -29,6 +31,7 @@ export const DEFAULT_PERMISSIONS = {
 		notes: false,
 		public_notes: false,
 		notes_outside_group: false,
+		folders: false,
 		public_chats: false,
 		public_calendars: false
 	},
@@ -50,6 +53,7 @@ export const DEFAULT_PERMISSIONS = {
 		edit: true,
 		share: true,
 		export: true,
+		import: true,
 		stt: true,
 		tts: true,
 		call: true,
@@ -69,7 +73,8 @@ export const DEFAULT_PERMISSIONS = {
 		code_interpreter: true,
 		memories: true,
 		automations: false,
-		calendar: true
+		calendar: true,
+		webhooks: false
 	},
 	settings: {
 		interface: true
