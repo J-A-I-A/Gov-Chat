@@ -2802,6 +2802,18 @@ SMTP_USE_TLS = os.getenv('SMTP_USE_TLS', 'True').lower() == 'true'
 # Implicit TLS / SSL from connect (typically port 465). Mutually exclusive with STARTTLS.
 SMTP_USE_SSL = os.getenv('SMTP_USE_SSL', 'False').lower() == 'true'
 
+####################################
+# Email MFA (6-digit login code)
+####################################
+
+# Global default: require an emailed 6-digit code on every password login.
+ENABLE_EMAIL_MFA = os.getenv('ENABLE_EMAIL_MFA', 'False').lower() == 'true'
+
+# Env-only kill switch: when true, hard-disables email MFA regardless of the
+# admin toggle or per-user opt-in. An escape hatch if a broken SMTP server
+# locks everyone out (MFA fails closed).
+DISABLE_EMAIL_MFA = os.getenv('DISABLE_EMAIL_MFA', 'False').lower() == 'true'
+
 DEFAULT_CONFIG = {
     'direct.enable': ENABLE_DIRECT_CONNECTIONS,
     'ollama.enable': ENABLE_OLLAMA_API,
@@ -3192,6 +3204,7 @@ DEFAULT_CONFIG = {
     'smtp.from_name': SMTP_FROM_NAME,
     'smtp.use_tls': SMTP_USE_TLS,
     'smtp.use_ssl': SMTP_USE_SSL,
+    'mfa.email.enable': ENABLE_EMAIL_MFA,
 }
 
 

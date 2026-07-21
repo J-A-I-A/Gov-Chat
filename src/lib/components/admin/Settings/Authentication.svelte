@@ -11,7 +11,9 @@
 		updateAdminConfig,
 		getSmtpConfig,
 		updateSmtpConfig,
-		sendTestEmail
+		sendTestEmail,
+		getMfaConfig,
+		updateMfaConfig
 	} from '$lib/apis/auths';
 	import { getGroups } from '$lib/apis/groups';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
@@ -55,6 +57,19 @@
 		from_name: '',
 		use_tls: true,
 		use_ssl: false
+	};
+
+	let ENABLE_EMAIL_MFA = false;
+
+	const updateMfaHandler = async () => {
+		const res = await updateMfaConfig(localStorage.token, ENABLE_EMAIL_MFA).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res) {
+			ENABLE_EMAIL_MFA = res.ENABLE_EMAIL_MFA;
+		}
+		return !!res;
 	};
 
 	const updateSmtpHandler = async () => {
@@ -120,8 +135,10 @@
 		const ldapSaved = await updateLdapServerHandler();
 		const oauthSaved = await updateOAuthHandler();
 		const smtpSaved = await updateSmtpHandler();
+		// MFA depends on SMTP being enabled, so save it after SMTP.
+		const mfaSaved = await updateMfaHandler();
 
-		if (adminSaved && ldapSaved && oauthSaved && smtpSaved) {
+		if (adminSaved && ldapSaved && oauthSaved && smtpSaved && mfaSaved) {
 			toast.success($i18n.t('Settings saved successfully!'));
 			await config.set(await getBackendConfig());
 		}
@@ -145,6 +162,12 @@
 				const smtp = await getSmtpConfig(localStorage.token).catch(() => null);
 				if (smtp) {
 					SMTP_CONFIG = smtp;
+				}
+			})(),
+			(async () => {
+				const mfa = await getMfaConfig(localStorage.token).catch(() => null);
+				if (mfa) {
+					ENABLE_EMAIL_MFA = mfa.ENABLE_EMAIL_MFA;
 				}
 			})()
 		]);
@@ -653,6 +676,22 @@
 						>
 							{$i18n.t('Send test email')}
 						</button>
+					</div>
+
+					<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
+
+					<div class="flex w-full justify-between pr-2">
+						<Tooltip
+							content={$i18n.t(
+								'Require every user to enter a 6-digit code emailed to them when signing in with a password.'
+							)}
+							placement="top-start"
+						>
+							<div class="self-center text-xs font-medium">
+								{$i18n.t('Require email code on login (MFA)')}
+							</div>
+						</Tooltip>
+						<Switch bind:state={ENABLE_EMAIL_MFA} />
 					</div>
 				</div>
 			{/if}

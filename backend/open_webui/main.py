@@ -45,6 +45,7 @@ from open_webui.config import (
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
+    DISABLE_EMAIL_MFA,
     ENABLE_ADMIN_ANALYTICS,
     # Admin
     ENABLE_ADMIN_CHAT_ACCESS,
@@ -1855,6 +1856,7 @@ async def get_app_config(request: Request):
         'oauth.auto_redirect',
         'ldap.enable',
         'smtp.enable',
+        'mfa.email.enable',
         'ui.enable_signup',
         'ui.enable_login_form',
         'auth.enable_api_keys',
@@ -1924,6 +1926,8 @@ async def get_app_config(request: Request):
                 {
                     'enable_api_keys': config.get('auth.enable_api_keys'),
                     'enable_password_change_form': config.get('ui.enable_password_change_form'),
+                    'email_mfa_available': bool(config.get('smtp.enable')) and not DISABLE_EMAIL_MFA,
+                    'email_mfa_required': bool(config.get('mfa.email.enable')) and not DISABLE_EMAIL_MFA,
                     'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
                     'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,

@@ -15,7 +15,9 @@
 		userSignIn,
 		userSignUp,
 		updateUserTimezone,
-		requestPasswordReset
+		requestPasswordReset,
+		verifyMfa,
+		resendMfa
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -71,13 +73,47 @@
 
 	let resetLinkSent = false;
 
+	// Email MFA (second-factor) state.
+	let mfaToken = '';
+	let mfaCode = '';
+	let trustDevice = false;
+
 	const signInHandler = async () => {
-		const sessionUser = await userSignIn(email, password).catch((error) => {
+		const res = await userSignIn(email, password).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res?.mfa_required) {
+			mfaToken = res.mfa_token;
+			mfaCode = '';
+			trustDevice = false;
+			mode = 'mfa';
+			toast.success($i18n.t('We emailed you a 6-digit verification code.'));
+			return;
+		}
+
+		await setSessionUser(res);
+	};
+
+	const mfaVerifyHandler = async () => {
+		const sessionUser = await verifyMfa(mfaToken, mfaCode.trim(), trustDevice).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
 		await setSessionUser(sessionUser);
+	};
+
+	const mfaResendHandler = async () => {
+		const res = await resendMfa(mfaToken).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('A new verification code has been sent.'));
+		}
 	};
 
 	const resetHandler = async () => {
@@ -125,6 +161,8 @@
 			await ldapSignInHandler();
 		} else if (mode === 'signin') {
 			await signInHandler();
+		} else if (mode === 'mfa') {
+			await mfaVerifyHandler();
 		} else if (mode === 'reset') {
 			await resetHandler();
 		} else {
@@ -302,6 +340,8 @@
 											{$i18n.t(`Sign in to {{WEBUI_NAME}} with LDAP`, { WEBUI_NAME: $WEBUI_NAME })}
 										{:else if mode === 'signin'}
 											{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+										{:else if mode === 'mfa'}
+											{$i18n.t('Verify your identity')}
 										{:else if mode === 'reset'}
 											{$i18n.t('Reset your password')}
 										{:else}
@@ -319,7 +359,44 @@
 									{/if}
 								</div>
 
-								{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
+								{#if mode === 'mfa'}
+									<div class="flex flex-col mt-4">
+										<div class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+											{$i18n.t('Enter the 6-digit code we emailed to')}
+											<span class="font-medium text-gray-700 dark:text-gray-300">{email}</span>.
+										</div>
+										<div class="mb-2">
+											<label for="mfa-code" class="text-sm font-medium text-left mb-1 block"
+												>{$i18n.t('Verification code')}</label
+											>
+											<input
+												bind:value={mfaCode}
+												type="text"
+												id="mfa-code"
+												inputmode="numeric"
+												autocomplete="one-time-code"
+												maxlength="6"
+												pattern="[0-9]*"
+												class="my-0.5 w-full text-lg tracking-[0.4em] text-center outline-hidden bg-transparent placeholder:tracking-normal placeholder:text-gray-300 dark:placeholder:text-gray-600"
+												placeholder="000000"
+												required
+											/>
+										</div>
+										<label class="flex items-center gap-2 mt-1 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+											<input type="checkbox" bind:checked={trustDevice} class="rounded" />
+											{$i18n.t('Trust this device for 30 days')}
+										</label>
+										<div class="mt-2 text-right">
+											<button
+												class="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+												type="button"
+												on:click={mfaResendHandler}
+											>
+												{$i18n.t('Resend code')}
+											</button>
+										</div>
+									</div>
+								{:else if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
 									<div class="flex flex-col mt-4">
 										{#if mode === 'signup'}
 											<div class="mb-2">
@@ -429,7 +506,27 @@
 									</div>
 								{/if}
 								<div class="mt-5">
-									{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
+									{#if mode === 'mfa'}
+										<button
+											class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+											type="submit"
+										>
+											{$i18n.t('Verify')}
+										</button>
+										<div class=" mt-4 text-sm text-center">
+											<button
+												class=" font-medium underline"
+												type="button"
+												on:click={() => {
+													mfaToken = '';
+													mfaCode = '';
+													mode = 'signin';
+												}}
+											>
+												{$i18n.t('Back to sign in')}
+											</button>
+										</div>
+									{:else if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
 										{#if mode === 'ldap'}
 											<button
 												class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
@@ -491,7 +588,7 @@
 								</div>
 							</form>
 
-							{#if Object.keys($config?.oauth?.providers ?? {}).length > 0}
+							{#if mode !== 'mfa' && Object.keys($config?.oauth?.providers ?? {}).length > 0}
 								<div class="inline-flex items-center justify-center w-full">
 									<hr class="w-32 h-px my-4 border-0 dark:bg-gray-100/10 bg-gray-700/10" />
 									{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
@@ -629,7 +726,7 @@
 								</div>
 							{/if}
 
-							{#if $config?.features.enable_ldap && $config?.features.enable_login_form}
+							{#if mode !== 'mfa' && $config?.features.enable_ldap && $config?.features.enable_login_form}
 								<div class="mt-2">
 									<button
 										class="flex justify-center items-center text-xs w-full text-center underline"

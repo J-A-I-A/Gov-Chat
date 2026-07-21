@@ -154,3 +154,26 @@ def build_set_password_email(name: str, url: str, kind: str, app_name: str) -> t
 
     text_body = f'Hi {greeting},\n\n{lead}\n\n{label}: {url}\n\nThis link expires soon and can only be used once.\n'
     return subject, html_body, text_body
+
+
+def build_mfa_code_email(name: str, code: str, app_name: str) -> tuple[str, str, str]:
+    """Return ``(subject, html_body, text_body)`` for a login verification code."""
+    greeting = name.strip() or 'there'
+    subject = f'Your {app_name} login code: {code}'
+    lead = (
+        f'Use this code to finish signing in to {app_name}. '
+        "If you didn't try to sign in, someone may have your password — "
+        'change it as soon as you can.'
+    )
+    html_body = f"""\
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;color:#111">
+  <p style="font-size:16px">Hi {greeting},</p>
+  <p style="font-size:14px;line-height:1.6;color:#333">{lead}</p>
+  <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:8px;text-align:center">{code}</p>
+  <p style="font-size:12px;color:#666;line-height:1.6">This code expires in 10 minutes and can only be used once.</p>
+</div>"""
+    text_body = (
+        f'Hi {greeting},\n\n{lead}\n\nYour login code is: {code}\n\n'
+        'This code expires in 10 minutes and can only be used once.\n'
+    )
+    return subject, html_body, text_body
