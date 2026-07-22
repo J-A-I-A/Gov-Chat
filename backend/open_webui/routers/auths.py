@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import re
+import secrets
 import time
 import urllib
 import uuid
@@ -15,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from ldap3 import NONE, Connection, Server, Tls
 from ldap3.utils.conv import escape_filter_chars
 from open_webui.config import (
+    DISABLE_EMAIL_MFA,
     ENABLE_PASSWORD_AUTH,
     OAUTH_PROVIDERS,
 )
@@ -33,6 +35,7 @@ from open_webui.env import (
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_AUTH_TRUSTED_ROLE_HEADER,
 )
+from open_webui.env import WEBUI_NAME
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import (
     AddUserForm,
@@ -46,6 +49,8 @@ from open_webui.models.auths import (
     UpdatePasswordForm,
 )
 from open_webui.models.config import Config
+from open_webui.models.mfa import MfaCodes, MfaTrustedDevices
+from open_webui.models.password_reset import PasswordResetTokens
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
@@ -68,6 +73,13 @@ from open_webui.utils.auth import (
     invalidate_token,
     validate_password,
     verify_password,
+)
+from open_webui.utils.email import (
+    EmailNotConfiguredError,
+    build_mfa_code_email,
+    build_set_password_email,
+    is_email_configured,
+    send_email,
 )
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.misc import parse_duration, validate_email_format
@@ -129,6 +141,42 @@ LDAP_SERVER_CONFIG_KEYS = {
     'validate_cert': 'ldap.server.validate_cert',
     'ciphers': 'ldap.server.ciphers',
 }
+
+SMTP_CONFIG_KEYS = {
+    'enable': 'smtp.enable',
+    'host': 'smtp.host',
+    'port': 'smtp.port',
+    'username': 'smtp.username',
+    'password': 'smtp.password',
+    'from_email': 'smtp.from_email',
+    'from_name': 'smtp.from_name',
+    'use_tls': 'smtp.use_tls',
+    'use_ssl': 'smtp.use_ssl',
+}
+
+# How long password-reset / account-setup links stay valid.
+PASSWORD_RESET_TTL_SECONDS = 60 * 60  # 1 hour
+ACCOUNT_SETUP_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+
+# Email MFA timings and the trusted-device cookie name.
+MFA_CODE_TTL_SECONDS = 60 * 10  # 10 minutes
+MFA_PENDING_TOKEN_TTL = datetime.timedelta(minutes=10)
+MFA_TRUSTED_DEVICE_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
+MFA_DEVICE_COOKIE = 'mfa_device'
+
+
+def _email_mfa_required_for(user, global_enabled: bool) -> bool:
+    """Whether an emailed code is required for this user's password login."""
+    if DISABLE_EMAIL_MFA:  # env kill switch wins
+        return False
+    per_user = bool((user.info or {}).get('mfa_email_enabled'))
+    return bool(global_enabled) or per_user
+
+
+async def _password_link_base(request: Request) -> str:
+    """Public base URL for links embedded in emails (configured URL, else request origin)."""
+    webui_url = await Config.get('webui.url')
+    return str(webui_url or request.base_url).rstrip('/')
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
@@ -399,6 +447,100 @@ async def update_password(
 
 
 ############################
+# Password Reset (via email)
+############################
+
+
+class PasswordResetRequestForm(BaseModel):
+    email: str
+
+
+class SetPasswordForm(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post('/password/reset/request', response_model=bool)
+async def request_password_reset(
+    request: Request,
+    form_data: PasswordResetRequestForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Send a password-reset link to the user's email.
+
+    Always returns True regardless of whether the account exists, so the endpoint
+    cannot be used to enumerate registered emails.
+    """
+    email = (form_data.email or '').lower().strip()
+
+    # Rate-limit by email to blunt enumeration / mail-bombing.
+    if email and signin_rate_limiter.is_limited(f'pwreset:{email}'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    # Password reset only applies to local password auth.
+    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER or not email or not validate_email_format(email):
+        return True
+
+    if not await is_email_configured():
+        return True
+
+    user = await Users.get_user_by_email(email, db=db)
+    if user:
+        try:
+            raw_token = await PasswordResetTokens.create(user.id, PASSWORD_RESET_TTL_SECONDS, db=db)
+            base = await _password_link_base(request)
+            reset_url = f'{base}/auth/reset-password?token={urllib.parse.quote(raw_token)}'
+            subject, html_body, text_body = build_set_password_email(user.name, reset_url, 'reset', WEBUI_NAME)
+            await send_email(user.email, subject, html_body, text_body)
+        except Exception as err:
+            # Do not reveal delivery failures to unauthenticated callers.
+            log.error('Password reset email failed for %s: %s', email, str(err))
+
+    return True
+
+
+@router.post('/password/set', response_model=bool)
+async def set_password(
+    request: Request,
+    form_data: SetPasswordForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Set a new password using a one-time reset / account-setup token."""
+    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+    if signin_rate_limiter.is_limited('pwset:token'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    try:
+        validate_password(form_data.new_password)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e))
+
+    user_id = await PasswordResetTokens.verify_and_consume(form_data.token, db=db)
+    if not user_id:
+        raise HTTPException(400, detail='This link is invalid or has expired.')
+
+    user = await Users.get_user_by_id(user_id, db=db)
+    if not user:
+        raise HTTPException(400, detail='This link is invalid or has expired.')
+
+    hashed = await get_password_hash(form_data.new_password)
+    success = await Auths.update_user_password_by_id(user_id, hashed, db=db)
+    if not success:
+        raise HTTPException(500, detail='Failed to update password.')
+
+    await publish_event(
+        request,
+        EVENTS.AUTH_PASSWORD_CHANGED,
+        actor=user,
+        subject_id=user.id,
+        subject_type='user',
+    )
+    return True
+
+
+############################
 # LDAP Authentication
 ############################
 @router.post('/ldap', response_model=SessionUserResponse)
@@ -650,13 +792,15 @@ async def ldap_auth(
 ############################
 
 
-@router.post('/signin', response_model=SessionUserResponse)
+@router.post('/signin')
 async def signin(
     request: Request,
     response: Response,
     form_data: SigninForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    # NOTE: no response_model — this returns either a full session
+    # (SessionUserResponse shape) or an MFA challenge {mfa_required, mfa_token}.
     if not ENABLE_PASSWORD_AUTH:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -750,9 +894,202 @@ async def signin(
         )
 
     if user:
+        # Email MFA gates interactive password logins only (never trusted-header/system).
+        if auth_source == 'password':
+            global_mfa = await Config.get('mfa.email.enable')
+            if _email_mfa_required_for(user, global_mfa):
+                device_cookie = request.cookies.get(MFA_DEVICE_COOKIE)
+                trusted = bool(device_cookie) and await MfaTrustedDevices.is_trusted(
+                    user.id, device_cookie, db=db
+                )
+                if not trusted:
+                    # Fail closed: MFA is on but there is no way to deliver the code.
+                    if not await is_email_configured():
+                        raise HTTPException(
+                            400,
+                            detail='Email verification is required but email is not configured. '
+                            'Contact your administrator.',
+                        )
+                    try:
+                        raw_code = await MfaCodes.create(user.id, MFA_CODE_TTL_SECONDS, db=db)
+                        subject, html_body, text_body = build_mfa_code_email(user.name, raw_code, WEBUI_NAME)
+                        await send_email(user.email, subject, html_body, text_body)
+                    except Exception as err:
+                        log.error('Failed to send MFA code to %s: %s', user.email, str(err))
+                        raise HTTPException(
+                            400,
+                            detail='Could not send your verification code. Please try again later.',
+                        )
+                    mfa_token = create_token(
+                        data={'id': user.id, 'mfa_pending': True},
+                        expires_delta=MFA_PENDING_TOKEN_TTL,
+                    )
+                    return {'mfa_required': True, 'mfa_token': mfa_token}
+
         return await create_session_response(request, user, db, response, set_cookie=True, source=auth_source)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+
+############################
+# Email MFA (login second factor)
+############################
+
+
+class MfaVerifyForm(BaseModel):
+    token: str
+    code: str
+    trust_device: bool | None = False
+
+
+class MfaResendForm(BaseModel):
+    token: str
+
+
+def _decode_mfa_pending(token: str) -> str | None:
+    """Return the user_id from a valid MFA pending token, else None."""
+    data = decode_token(token)
+    if not data or not data.get('mfa_pending') or not data.get('id'):
+        return None
+    return data['id']
+
+
+@router.post('/signin/mfa/verify')
+async def verify_mfa(
+    request: Request,
+    response: Response,
+    form_data: MfaVerifyForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Complete an MFA login by verifying the emailed 6-digit code."""
+    if signin_rate_limiter.is_limited('mfa:verify'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    user_id = _decode_mfa_pending(form_data.token)
+    if not user_id:
+        raise HTTPException(400, detail='Your verification session has expired. Please sign in again.')
+
+    result = await MfaCodes.verify(user_id, form_data.code, db=db)
+    if result == 'ok':
+        pass
+    elif result == 'expired':
+        raise HTTPException(400, detail='That code has expired. Please request a new one.')
+    elif result == 'locked':
+        raise HTTPException(400, detail='Too many incorrect attempts. Please sign in again.')
+    else:
+        raise HTTPException(400, detail='Incorrect code. Please try again.')
+
+    user = await Users.get_user_by_id(user_id, db=db)
+    if not user:
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+    session = await create_session_response(request, user, db, response, set_cookie=True, source='password')
+
+    if form_data.trust_device:
+        try:
+            raw_token = await MfaTrustedDevices.create(
+                user.id,
+                MFA_TRUSTED_DEVICE_TTL_SECONDS,
+                request.headers.get('user-agent'),
+                db=db,
+            )
+            response.set_cookie(
+                key=MFA_DEVICE_COOKIE,
+                value=raw_token,
+                max_age=MFA_TRUSTED_DEVICE_TTL_SECONDS,
+                httponly=True,
+                samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+                secure=WEBUI_AUTH_COOKIE_SECURE,
+            )
+        except Exception as err:
+            log.error('Failed to persist trusted device for %s: %s', user.id, str(err))
+
+    return session
+
+
+@router.post('/signin/mfa/resend', response_model=bool)
+async def resend_mfa(
+    request: Request,
+    form_data: MfaResendForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Email a fresh MFA code for a pending login."""
+    if signin_rate_limiter.is_limited('mfa:resend'):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED)
+
+    user_id = _decode_mfa_pending(form_data.token)
+    if not user_id:
+        raise HTTPException(400, detail='Your verification session has expired. Please sign in again.')
+
+    if not await is_email_configured():
+        raise HTTPException(400, detail='Email is not configured.')
+
+    user = await Users.get_user_by_id(user_id, db=db)
+    if not user:
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+    try:
+        raw_code = await MfaCodes.create(user.id, MFA_CODE_TTL_SECONDS, db=db)
+        subject, html_body, text_body = build_mfa_code_email(user.name, raw_code, WEBUI_NAME)
+        await send_email(user.email, subject, html_body, text_body)
+    except Exception as err:
+        log.error('Failed to resend MFA code to %s: %s', user.email, str(err))
+        raise HTTPException(400, detail='Could not send your verification code. Please try again later.')
+
+    return True
+
+
+class MfaPreferenceForm(BaseModel):
+    enabled: bool
+
+
+@router.get('/mfa/preference')
+async def get_mfa_preference(
+    request: Request, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    """The signed-in user's own MFA opt-in, plus whether it's available/forced."""
+    return {
+        'enabled': bool((user.info or {}).get('mfa_email_enabled')),
+        'available': await is_email_configured() and not DISABLE_EMAIL_MFA,
+        'required': bool(await Config.get('mfa.email.enable')) and not DISABLE_EMAIL_MFA,
+    }
+
+
+@router.post('/mfa/preference')
+async def set_mfa_preference(
+    request: Request,
+    form_data: MfaPreferenceForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Let a user require an emailed code on their own logins."""
+    if form_data.enabled and not await is_email_configured():
+        raise HTTPException(400, detail='Email is not configured, so email MFA cannot be enabled.')
+
+    info = dict(user.info or {})
+    info['mfa_email_enabled'] = bool(form_data.enabled)
+    await Users.update_user_by_id(user.id, {'info': info}, db=db)
+    if not form_data.enabled:
+        # Turning MFA off clears any trusted-device records.
+        await MfaTrustedDevices.revoke_all(user.id, db=db)
+    return {'enabled': bool(form_data.enabled)}
+
+
+class MfaConfigForm(BaseModel):
+    enable_email_mfa: bool | None = None
+
+
+@router.get('/admin/config/mfa')
+async def get_mfa_config(request: Request, user=Depends(get_admin_user)):
+    return {'ENABLE_EMAIL_MFA': await Config.get('mfa.email.enable')}
+
+
+@router.post('/admin/config/mfa')
+async def update_mfa_config(request: Request, form_data: MfaConfigForm, user=Depends(get_admin_user)):
+    if form_data.enable_email_mfa and not await is_email_configured():
+        raise HTTPException(400, detail='Configure and enable SMTP before requiring email MFA.')
+    await Config.upsert({'mfa.email.enable': bool(form_data.enable_email_mfa)})
+    return {'ENABLE_EMAIL_MFA': await Config.get('mfa.email.enable')}
 
 
 ############################
@@ -1028,13 +1365,25 @@ async def add_user(
     if await Users.get_user_by_email(form_data.email.lower(), db=db):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
-    try:
-        try:
-            validate_password(form_data.password)
-        except Exception as e:
-            raise HTTPException(400, detail=str(e))
+    send_setup_email = bool(form_data.send_setup_email)
 
-        hashed = await get_password_hash(form_data.password)
+    try:
+        if send_setup_email:
+            # Admin opted to email the user a set-password link instead of choosing
+            # a password. Require email delivery to be available first.
+            if not await is_email_configured():
+                raise HTTPException(400, detail='SMTP is not enabled or configured.')
+            # A random internal password satisfies the auth record; the user never
+            # sees it and replaces it via the setup link.
+            password = secrets.token_urlsafe(24)
+        else:
+            password = form_data.password or ''
+            try:
+                validate_password(password)
+            except Exception as e:
+                raise HTTPException(400, detail=str(e))
+
+        hashed = await get_password_hash(password)
         user = await Auths.insert_new_auth(
             form_data.email.lower(),
             hashed,
@@ -1058,6 +1407,24 @@ async def add_user(
                 source='admin',
                 data={'role': user.role},
             )
+
+            if send_setup_email:
+                try:
+                    raw_token = await PasswordResetTokens.create(user.id, ACCOUNT_SETUP_TTL_SECONDS, db=db)
+                    base = await _password_link_base(request)
+                    setup_url = f'{base}/auth/reset-password?token={urllib.parse.quote(raw_token)}'
+                    subject, html_body, text_body = build_set_password_email(
+                        user.name, setup_url, 'setup', WEBUI_NAME
+                    )
+                    await send_email(user.email, subject, html_body, text_body)
+                except Exception as err:
+                    # The account exists; surface the delivery failure so the admin
+                    # can resend, but don't roll back the user.
+                    log.error('Account setup email failed for %s: %s', user.email, str(err))
+                    raise HTTPException(
+                        500,
+                        detail='User created, but the setup email could not be sent. Check SMTP settings.',
+                    )
 
             expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
             token = create_token(data={'id': user.id}, expires_delta=expires_delta)
@@ -1229,6 +1596,83 @@ class LdapConfigForm(BaseModel):
 async def update_ldap_config(request: Request, form_data: LdapConfigForm, user=Depends(get_admin_user)):
     await Config.upsert({'ldap.enable': form_data.enable_ldap})
     return {'ENABLE_LDAP': await Config.get('ldap.enable')}
+
+
+############################
+# SMTP / Email Config
+############################
+
+
+class SmtpConfig(BaseModel):
+    enable: bool = False
+    host: str = ''
+    port: int | None = 587
+    username: str = ''
+    # Write-only: GET always returns '' and POST only overwrites when a value is sent.
+    password: str = ''
+    from_email: str = ''
+    from_name: str = ''
+    use_tls: bool = True
+    use_ssl: bool = False
+
+
+@router.get('/admin/config/smtp', response_model=SmtpConfig)
+async def get_smtp_config(request: Request, user=Depends(get_admin_user)):
+    values = await get_config_values(SMTP_CONFIG_KEYS)
+    # Never expose the stored SMTP password to the browser.
+    values['password'] = ''
+    return values
+
+
+@router.post('/admin/config/smtp', response_model=SmtpConfig)
+async def update_smtp_config(request: Request, form_data: SmtpConfig, user=Depends(get_admin_user)):
+    if form_data.enable and (not form_data.host or not form_data.from_email):
+        raise HTTPException(400, detail='SMTP host and From address are required to enable email.')
+
+    updates = config_updates(form_data.model_dump(), SMTP_CONFIG_KEYS)
+    updates['smtp.port'] = int(form_data.port) if form_data.port else 587
+    # Write-only password: only overwrite when the admin actually typed something.
+    if form_data.password:
+        updates['smtp.password'] = form_data.password
+    else:
+        updates.pop('smtp.password', None)
+
+    await Config.upsert(updates)
+
+    result = await get_config_values(SMTP_CONFIG_KEYS)
+    result['password'] = ''
+    return result
+
+
+class SmtpTestForm(BaseModel):
+    to_email: str | None = None
+
+
+@router.post('/admin/config/smtp/test', response_model=bool)
+async def test_smtp_config(request: Request, form_data: SmtpTestForm, user=Depends(get_admin_user)):
+    """Send a test email (defaults to the requesting admin's address)."""
+    to_email = (form_data.to_email or user.email or '').lower().strip()
+    if not to_email or not validate_email_format(to_email):
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
+
+    if not await is_email_configured():
+        raise HTTPException(400, detail='SMTP is not enabled or configured.')
+
+    html_body = (
+        '<div style="font-family:sans-serif">'
+        f'<p>This is a test email from <b>{WEBUI_NAME}</b>.</p>'
+        '<p>If you received this, your SMTP settings are working.</p>'
+        '</div>'
+    )
+    try:
+        await send_email(to_email, f'{WEBUI_NAME} SMTP test', html_body, 'SMTP test — your settings are working.')
+    except EmailNotConfiguredError:
+        raise HTTPException(400, detail='SMTP is not enabled or configured.')
+    except Exception as err:
+        log.error('SMTP test failed: %s', str(err))
+        raise HTTPException(400, detail=f'Failed to send test email: {err}')
+
+    return True
 
 
 ############################

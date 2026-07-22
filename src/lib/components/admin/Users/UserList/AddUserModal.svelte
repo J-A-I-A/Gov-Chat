@@ -8,9 +8,11 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import { config } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -25,7 +27,8 @@
 		name: '',
 		email: '',
 		password: '',
-		role: 'user'
+		role: 'user',
+		send_setup_email: false
 	};
 
 	$: if (show) {
@@ -33,9 +36,17 @@
 			name: '',
 			email: '',
 			password: '',
-			role: 'user'
+			role: 'user',
+			send_setup_email: false
 		};
 	}
+
+	const generatePassword = () => {
+		// Strong random password the admin can copy, or leave for the setup email.
+		const bytes = new Uint8Array(18);
+		crypto.getRandomValues(bytes);
+		_user.password = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 20);
+	};
 
 	const submitHandler = async () => {
 		const stopLoading = () => {
@@ -50,9 +61,10 @@
 				localStorage.token,
 				_user.name,
 				_user.email,
-				_user.password,
+				_user.send_setup_email ? '' : _user.password,
 				_user.role,
-				generateInitialsImage(_user.name)
+				generateInitialsImage(_user.name),
+				_user.send_setup_email
 			).catch((error) => {
 				toast.error(`${error}`);
 			});
@@ -241,21 +253,44 @@
 								</div>
 							</div>
 
-							<div class="flex flex-col w-full mt-1">
-								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Password')}</div>
-
-								<div class="flex-1">
-									<SensitiveInput
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
-										type="password"
-										bind:value={_user.password}
-										aria-label={$i18n.t('Password')}
-										placeholder={$i18n.t('Enter Your Password')}
-										autocomplete="off"
-										required
-									/>
+							{#if $config?.features?.enable_password_reset}
+								<div class="flex items-center justify-between w-full mt-2">
+									<div class="text-xs text-gray-500 pr-2">
+										{$i18n.t('Send account setup email')}
+										<div class="text-[0.65rem] text-gray-400 dark:text-gray-500">
+											{$i18n.t('The user receives a link to set their own password.')}
+										</div>
+									</div>
+									<Switch bind:state={_user.send_setup_email} />
 								</div>
-							</div>
+							{/if}
+
+							{#if !_user.send_setup_email}
+								<div class="flex flex-col w-full mt-1">
+									<div class="mb-1 flex items-center justify-between">
+										<div class="text-xs text-gray-500">{$i18n.t('Password')}</div>
+										<button
+											class="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+											type="button"
+											on:click={generatePassword}
+										>
+											{$i18n.t('Generate')}
+										</button>
+									</div>
+
+									<div class="flex-1">
+										<SensitiveInput
+											class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+											type="password"
+											bind:value={_user.password}
+											aria-label={$i18n.t('Password')}
+											placeholder={$i18n.t('Enter Your Password')}
+											autocomplete="off"
+											required
+										/>
+									</div>
+								</div>
+							{/if}
 						{:else if tab === 'import'}
 							<div>
 								<div class="mb-3 w-full">

@@ -413,7 +413,8 @@ export const addUser = async (
 	email: string,
 	password: string,
 	role: string = 'pending',
-	profile_image_url: null | string = null
+	profile_image_url: null | string = null,
+	send_setup_email: boolean = false
 ) => {
 	let error = null;
 
@@ -428,6 +429,7 @@ export const addUser = async (
 			email: email,
 			password: password,
 			role: role,
+			send_setup_email: send_setup_email,
 			...(profile_image_url && { profile_image_url: profile_image_url })
 		})
 	})
@@ -613,6 +615,308 @@ export const deleteOAuthSession = async (token: string, provider: string) => {
 			}
 		}
 	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getSmtpConfig = async (token: string = '') => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/smtp`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateSmtpConfig = async (token: string = '', body: object) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/smtp`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify(body)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const sendTestEmail = async (token: string = '', to_email: string | null = null) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/smtp/test`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({ to_email })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const requestPasswordReset = async (email: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/password/reset/request`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ email })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const setPassword = async (token: string, new_password: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/password/set`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ token, new_password })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const verifyMfa = async (mfa_token: string, code: string, trust_device: boolean = false) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signin/mfa/verify`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		credentials: 'include',
+		body: JSON.stringify({ token: mfa_token, code, trust_device })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const resendMfa = async (mfa_token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signin/mfa/resend`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ token: mfa_token })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getMfaPreference = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/mfa/preference`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const setMfaPreference = async (token: string, enabled: boolean) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/mfa/preference`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ enabled })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getMfaConfig = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/mfa`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateMfaConfig = async (token: string, enable_email_mfa: boolean) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/mfa`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ enable_email_mfa })
+	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();

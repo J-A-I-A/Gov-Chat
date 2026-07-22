@@ -1,6 +1,6 @@
 {
-  "name": "Gov Chat",
-  "short_name": "Gov Chat",
+  "name": "GovAi",
+  "short_name": "GovAi",
   "icons": [
     {
       "src": "/static/web-app-manifest-192x192.png",

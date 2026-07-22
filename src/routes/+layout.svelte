@@ -1167,9 +1167,11 @@
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				} else {
-					// Don't redirect if we're already on the auth page
+					// Don't redirect if we're already on an unauthenticated auth page
+					// (login, or the emailed password reset / account setup page).
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if ($page.url.pathname !== '/auth') {
+					const publicAuthPaths = ['/auth', '/auth/reset-password'];
+					if (!publicAuthPaths.includes($page.url.pathname)) {
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				}

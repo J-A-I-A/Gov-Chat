@@ -3,7 +3,14 @@
 	import { onMount, getContext } from 'svelte';
 
 	import { user, config, settings } from '$lib/stores';
-	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
+	import {
+		updateUserProfile,
+		createAPIKey,
+		getAPIKey,
+		getSessionUser,
+		getMfaPreference,
+		setMfaPreference
+	} from '$lib/apis/auths';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import UpdatePassword from './Account/UpdatePassword.svelte';
@@ -12,6 +19,7 @@
 	import { copyToClipboard } from '$lib/utils';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import User from '$lib/components/icons/User.svelte';
@@ -36,6 +44,34 @@
 	let showAPIKeys = false;
 
 	let JWTTokenCopied = false;
+
+	// Email MFA (per-user opt-in).
+	let mfaAvailable = false;
+	let mfaRequired = false;
+	let mfaEnabled = false;
+
+	const setMfaPreferenceHandler = async (enabled: boolean) => {
+		if (mfaRequired) {
+			// Locked on by the admin — keep it enabled.
+			mfaEnabled = true;
+			return;
+		}
+		const res = await setMfaPreference(localStorage.token, enabled).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res) {
+			mfaEnabled = res.enabled;
+			toast.success(
+				enabled
+					? $i18n.t('Email verification enabled for your logins.')
+					: $i18n.t('Email verification disabled for your logins.')
+			);
+		} else {
+			// Revert the toggle on failure.
+			mfaEnabled = !enabled;
+		}
+	};
 
 	let APIKey = '';
 	let APIKeyCopied = false;
@@ -107,6 +143,15 @@
 		}
 
 		webhookUrl = $settings?.notifications?.webhook_url ?? '';
+
+		if ($config?.features?.email_mfa_available) {
+			const pref = await getMfaPreference(localStorage.token).catch(() => null);
+			if (pref) {
+				mfaAvailable = pref.available;
+				mfaRequired = pref.required;
+				mfaEnabled = pref.required || pref.enabled;
+			}
+		}
 
 		// Only fetch API key if the feature is enabled and user has permission
 		if (
@@ -251,6 +296,28 @@
 		{#if $config?.features.enable_login_form && $config?.features.enable_password_change_form}
 			<div class="mt-2">
 				<UpdatePassword />
+			</div>
+		{/if}
+
+		{#if mfaAvailable}
+			<div class="flex justify-between items-center text-sm mt-4">
+				<div>
+					<div class="font-medium">{$i18n.t('Require email code on login')}</div>
+					<div class="text-xs text-gray-500 mt-0.5">
+						{#if mfaRequired}
+							{$i18n.t('Required by your administrator.')}
+						{:else}
+							{$i18n.t('Get a 6-digit code by email each time you sign in.')}
+						{/if}
+					</div>
+				</div>
+				<Tooltip
+					content={mfaRequired
+						? $i18n.t('This is required by your administrator and cannot be turned off.')
+						: ''}
+				>
+					<Switch bind:state={mfaEnabled} on:change={(e) => setMfaPreferenceHandler(e.detail)} />
+				</Tooltip>
 			</div>
 		{/if}
 
